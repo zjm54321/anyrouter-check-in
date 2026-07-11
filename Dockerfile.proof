@@ -22,6 +22,8 @@ RUN apt-get update \
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev
+RUN uv run --locked --no-dev playwright install-deps chromium \
+	&& rm -rf /var/lib/apt/lists/*
 COPY checkin.py proof_checkin.py ./
 COPY proof_harness ./proof_harness
 COPY utils ./utils
