@@ -6,7 +6,7 @@ from typing import Protocol
 import httpx
 
 from proof_harness.config import ProofConfig, ProxyMode
-from proof_harness.json_types import parse_json
+from proof_harness.json_types import parse_json, read_egress_identity
 from proof_harness.models import BrowserSession, HttpObservation, ProofResult, Stage
 
 ALLOWED_COOKIE_NAMES = frozenset({'session', 'acw_tc', 'cdn_sec_tc', 'acw_sc__v2'})
@@ -127,8 +127,8 @@ def run_proof(
 			egress_payload = parse_json(egress_response.content)
 		except ValueError:
 			return _failure(Stage.EGRESS, 'egress_non_json', session, config, observations)
-		http_egress = egress_payload.get('identity') if isinstance(egress_payload, dict) else None
-		if not isinstance(http_egress, str) or not http_egress.strip():
+		http_egress = read_egress_identity(egress_payload)
+		if http_egress is None:
 			return _failure(Stage.EGRESS, 'http_egress_required', session, config, observations)
 		if session.egress_identity != http_egress:
 			return _failure(Stage.EGRESS, 'egress_mismatch', session, config, observations, http_egress)

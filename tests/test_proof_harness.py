@@ -113,7 +113,7 @@ def test_runner_emits_one_sanitized_result_for_reference_flow() -> None:
 		if request.url.path == '/proof/egress':
 			return httpx.Response(200, json={'identity': '198.51.100.10'}, extensions={'http_version': b'HTTP/2'})
 		if request.url.path == '/identity':
-			return httpx.Response(200, json={'identity': '198.51.100.10'}, extensions={'http_version': b'HTTP/2'})
+			return httpx.Response(200, json={'ip': '198.51.100.10'}, extensions={'http_version': b'HTTP/2'})
 		if request.url.path == '/api/user/self':
 			return httpx.Response(
 				200,

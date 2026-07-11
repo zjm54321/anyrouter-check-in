@@ -12,7 +12,7 @@ from playwright.async_api import Page, Response
 from typing_extensions import override
 
 from proof_harness.config import ProofConfig, ProxyMode
-from proof_harness.json_types import parse_json
+from proof_harness.json_types import parse_json, read_egress_identity
 from proof_harness.models import BrowserSession, Cookie
 
 if TYPE_CHECKING:
@@ -98,8 +98,8 @@ class CloakBrowserBoundary:
 				egress_payload = parse_json(await egress_response.body())
 			except ValueError as error:
 				raise BrowserFailure('browser_egress_non_json') from error
-			egress_identity = egress_payload.get('identity') if isinstance(egress_payload, dict) else None
-			if not isinstance(egress_identity, str) or not egress_identity.strip():
+			egress_identity = read_egress_identity(egress_payload)
+			if egress_identity is None:
 				raise BrowserFailure('browser_egress_required')
 			user_agent = await _read_user_agent(proof_page)
 			cookies = await context.cookies()

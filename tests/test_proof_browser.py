@@ -70,7 +70,7 @@ async def test_browser_boundary_uses_reference_flow_and_second_egress_page(
 	config = parse_proof_config(valid_env())
 	assert isinstance(config, ProofConfig)
 	login_page = FakePage('login')
-	egress_page = FakePage('egress', FakeResponse(200, {'identity': '198.51.100.10'}))
+	egress_page = FakePage('egress', FakeResponse(200, {'ip': '198.51.100.10'}))
 	browser = FakeLaunchedBrowser(FakeContext(login_page, egress_page))
 	calls: list[tuple[str, str]] = []
 

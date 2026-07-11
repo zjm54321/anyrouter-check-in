@@ -13,3 +13,13 @@ _loads: Callable[[str | bytes | bytearray], JsonValue] = json.loads
 
 def parse_json(data: str | bytes | bytearray) -> JsonValue:
 	return _loads(data)
+
+
+def read_egress_identity(payload: JsonValue) -> str | None:
+	if not isinstance(payload, dict):
+		return None
+	for key in ('identity', 'ip'):
+		value = payload.get(key)
+		if isinstance(value, str) and value.strip():
+			return value
+	return None
