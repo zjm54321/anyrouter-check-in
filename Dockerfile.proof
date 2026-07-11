@@ -27,6 +27,59 @@ RUN uv run --locked --no-dev playwright install-deps chromium \
 COPY checkin.py proof_checkin.py ./
 COPY proof_harness ./proof_harness
 COPY utils ./utils
-RUN CLOAKBROWSER_AUTO_UPDATE=false uv run --locked --no-dev python -m cloakbrowser install
+RUN CLOAKBROWSER_AUTO_UPDATE=false CLOAKBROWSER_SKIP_CHECKSUM=false .venv/bin/python - <<'PY'
+import json
+import os
+import stat
+import subprocess
+from pathlib import Path
+
+from cloakbrowser import binary_info, ensure_binary
+
+if 'CLOAKBROWSER_BINARY_PATH' in os.environ:
+	raise RuntimeError('CLOAKBROWSER_BINARY_PATH must not override the locked proof binary')
+
+installed_path = ensure_binary()
+if not isinstance(installed_path, str) or not installed_path:
+	raise TypeError('ensure_binary() must return a nonempty string path')
+
+binary_path = Path(installed_path)
+if not binary_path.is_absolute():
+	raise RuntimeError('ensure_binary() returned a non-absolute path')
+
+resolved_path = binary_path.resolve(strict=True)
+if not resolved_path.is_file():
+	raise RuntimeError('CloakBrowser binary is not a regular file')
+if resolved_path.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH) == 0:
+	raise RuntimeError('CloakBrowser binary has no executable bit')
+if not os.access(resolved_path, os.X_OK):
+	raise RuntimeError('CloakBrowser binary is not executable')
+
+binary_metadata = binary_info()
+if not isinstance(binary_metadata, dict):
+	raise TypeError('binary_info() must return a dictionary')
+if binary_metadata['installed'] is not True:
+	raise RuntimeError('binary_info() does not report an installed binary')
+metadata_path_value = binary_metadata['binary_path']
+if not isinstance(metadata_path_value, str) or not metadata_path_value:
+	raise TypeError('binary_info() must return a nonempty string binary_path')
+metadata_path = Path(metadata_path_value)
+if not metadata_path.is_absolute():
+	raise RuntimeError('binary_info() returned a non-absolute binary_path')
+if metadata_path.resolve(strict=True) != resolved_path:
+	raise RuntimeError('ensure_binary() and binary_info() paths differ')
+metadata_version = binary_metadata['version']
+if not isinstance(metadata_version, str) or not metadata_version.strip():
+	raise TypeError('binary_info() must return a nonempty string version')
+
+subprocess.run(
+	[str(resolved_path), '--version'],
+	check=True,
+	capture_output=True,
+	text=True,
+	timeout=30,
+)
+print(json.dumps({'event': 'cloakbrowser_binary_ready', 'version': metadata_version[:128]}, separators=(',', ':')))
+PY
 
 ENTRYPOINT ["xvfb-run", "-a", "uv", "run", "--no-sync", "python", "proof_checkin.py"]
