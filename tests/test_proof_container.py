@@ -26,3 +26,17 @@ def test_proof_image_installs_chromium_runtime_dependencies_before_browser() -> 
 	# Then
 	assert dependency_install >= 0
 	assert dependency_install < browser_install
+
+
+def test_proof_image_disables_background_updates_during_browser_install() -> None:
+	# Given
+	dockerfile = Path('Dockerfile.proof').read_text(encoding='utf-8')
+
+	# When
+	install_line = next(
+		line for line in dockerfile.splitlines() if 'python -m cloakbrowser install' in line
+	)
+
+	# Then
+	assert 'CLOAKBROWSER_AUTO_UPDATE=false' in install_line
+	assert '|| true' not in install_line

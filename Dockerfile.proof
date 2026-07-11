@@ -27,6 +27,6 @@ RUN uv run --locked --no-dev playwright install-deps chromium \
 COPY checkin.py proof_checkin.py ./
 COPY proof_harness ./proof_harness
 COPY utils ./utils
-RUN uv run --locked --no-dev python -m cloakbrowser install
+RUN CLOAKBROWSER_AUTO_UPDATE=false uv run --locked --no-dev python -m cloakbrowser install
 
 ENTRYPOINT ["xvfb-run", "-a", "uv", "run", "--no-sync", "python", "proof_checkin.py"]
