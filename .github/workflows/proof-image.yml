@@ -1,0 +1,124 @@
+name: Publish proof image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: proof-image-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: '0.11.28'
+
+      - name: Install locked development dependencies
+        run: uv sync --locked --dev
+
+      - name: Run proof tests
+        run: uv run --locked pytest tests/test_proof_*.py
+
+      - name: Run Ruff on proof code
+        run: uv run --locked ruff check proof_checkin.py proof_harness cloakbrowser.pyi tests/test_proof_*.py
+
+      - name: Type-check proof code
+        run: >-
+          uvx --from basedpyright==1.39.3 basedpyright
+          proof_checkin.py proof_harness cloakbrowser.pyi tests/test_proof_*.py
+
+      - name: Define immutable image tag
+        id: image
+        shell: bash
+        run: |
+          image_repository="$(printf '%s' "ghcr.io/${GITHUB_REPOSITORY_OWNER}/anyrouter-reference-proof" | tr '[:upper:]' '[:lower:]')"
+          image="${image_repository}:${GITHUB_SHA}"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+
+      - name: Build linux/amd64 proof image
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: docker build --platform linux/amd64 --file Dockerfile.proof --tag "$IMAGE" .
+
+      - name: Run credential-free fail-closed smoke test
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        shell: bash
+        run: |
+          set +e
+          docker run --rm --network none "$IMAGE" >smoke.stdout 2>smoke.stderr
+          status=$?
+          set -e
+
+          test "$status" -eq 1
+          test ! -s smoke.stderr
+          test "$(docker image inspect "$IMAGE" --format '{{.Architecture}}')" = 'amd64'
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          lines = Path('smoke.stdout').read_text(encoding='utf-8').splitlines()
+          assert len(lines) == 1, lines
+          assert json.loads(lines[0]) == {
+              'browser_egress_sha256': None,
+              'category': 'proof_mode_required',
+              'cookie_names': [],
+              'http': [],
+              'http_egress_sha256': None,
+              'ok': False,
+              'stage': 'config',
+          }
+          PY
+          if grep -Eiq '(authorization|bearer[[:space:]]|password|secret|session|token)' smoke.stdout smoke.stderr; then
+            echo 'Smoke output contained a secret-like value' >&2
+            exit 1
+          fi
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Refuse to overwrite an existing SHA tag
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          if docker buildx imagetools inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "Refusing to overwrite existing immutable tag: $IMAGE" >&2
+            exit 1
+          fi
+
+      - name: Push immutable image
+        id: push
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        shell: bash
+        run: |
+          set -o pipefail
+          docker push "$IMAGE" 2>&1 | tee push.log
+          digest="$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*$/\1/p' push.log | tail -n 1)"
+          test -n "$digest"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Report pushed digest
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          echo '## Proof image published' >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${IMAGE}@${DIGEST}\`" >> "$GITHUB_STEP_SUMMARY"

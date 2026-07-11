@@ -1,0 +1,29 @@
+FROM --platform=linux/amd64 python:3.11-slim-bookworm@sha256:f5cf0344c9886ff24d34797578d5d7dd6e8911ae0fe5962bb55d0f89603ec361
+
+COPY --from=ghcr.io/astral-sh/uv@sha256:2381d6aa60c326b71fd40023f921a0a3b8f91b14d5db6b90402e65a635053709 /uv /uvx /bin/
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy
+
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends \
+		ca-certificates \
+		fonts-freefont-ttf \
+		fonts-ipafont-gothic \
+		fonts-noto-color-emoji \
+		fonts-tlwg-loma-otf \
+		fonts-unifont \
+		fonts-wqy-zenhei \
+		xvfb \
+	&& rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev
+COPY checkin.py proof_checkin.py ./
+COPY proof_harness ./proof_harness
+COPY utils ./utils
+RUN uv run --locked --no-dev python -m cloakbrowser install
+
+ENTRYPOINT ["xvfb-run", "-a", "uv", "run", "--no-sync", "python", "proof_checkin.py"]
