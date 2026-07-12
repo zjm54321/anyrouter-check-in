@@ -61,7 +61,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          timeout --signal=TERM --kill-after=5s 30s docker run --rm --network none "$IMAGE" >smoke.stdout 2>smoke.stderr
+          timeout --signal=TERM --kill-after=5s 30s docker run --entrypoint .venv/bin/python --rm --network none "$IMAGE" proof_checkin.py >smoke.stdout 2>smoke.stderr
           status=$?
           set -e
 

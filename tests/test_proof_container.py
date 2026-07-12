@@ -98,3 +98,18 @@ def test_proof_image_entrypoint_uses_venv_python_directly_under_xvfb() -> None:
 	# Then
 	assert entrypoint == 'ENTRYPOINT ["xvfb-run", "-a", ".venv/bin/python", "proof_checkin.py"]'
 	assert 'uv run' not in entrypoint
+
+
+def test_credential_free_smoke_bypasses_browser_entrypoint() -> None:
+	# Given
+	workflow = Path('.github/workflows/proof-image.yml').read_text(encoding='utf-8')
+
+	# When
+	smoke_step = workflow.split('name: Run credential-free fail-closed smoke test', 1)[1].split(
+		'- name: Log in to GHCR',
+		1,
+	)[0]
+
+	# Then
+	assert 'docker run --entrypoint .venv/bin/python' in smoke_step
+	assert 'proof_checkin.py' in smoke_step
