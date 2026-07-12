@@ -40,19 +40,31 @@ class ConfigFailure:
 def parse_proof_config(env: Mapping[str, str]) -> ProofConfig | ConfigFailure:
 	if env.get('PROOF_MODE', '').strip().lower() != 'true':
 		return ConfigFailure(Stage.CONFIG, 'proof_mode_required')
-	try:
-		accounts = parse_json(env.get('ANYROUTER_ACCOUNTS', ''))
-	except ValueError:
-		return ConfigFailure(Stage.CONFIG, 'accounts_invalid')
-	if not isinstance(accounts, list) or len(accounts) != 1:
-		return ConfigFailure(Stage.CONFIG, 'single_account_required')
-	account = accounts[0]
-	if not isinstance(account, dict):
-		return ConfigFailure(Stage.CONFIG, 'account_invalid')
-	email = account.get('email')
-	password = account.get('password')
-	if not isinstance(email, str) or not email or not isinstance(password, str) or not password:
-		return ConfigFailure(Stage.CONFIG, 'credentials_required')
+	accounts_input = env.get('ANYROUTER_ACCOUNTS')
+	email_input = env.get('ANYROUTER_EMAIL')
+	password_input = env.get('ANYROUTER_PASSWORD')
+	separate_input_present = email_input is not None or password_input is not None
+	if accounts_input is not None and separate_input_present:
+		return ConfigFailure(Stage.CONFIG, 'credential_modes_conflict')
+	if separate_input_present:
+		if not email_input or not password_input:
+			return ConfigFailure(Stage.CONFIG, 'credentials_required')
+		proof_account = ProofAccount(email=email_input, password=password_input)
+	else:
+		try:
+			accounts = parse_json(accounts_input or '')
+		except ValueError:
+			return ConfigFailure(Stage.CONFIG, 'accounts_invalid')
+		if not isinstance(accounts, list) or len(accounts) != 1:
+			return ConfigFailure(Stage.CONFIG, 'single_account_required')
+		account = accounts[0]
+		if not isinstance(account, dict):
+			return ConfigFailure(Stage.CONFIG, 'account_invalid')
+		email = account.get('email')
+		password = account.get('password')
+		if not isinstance(email, str) or not email or not isinstance(password, str) or not password:
+			return ConfigFailure(Stage.CONFIG, 'credentials_required')
+		proof_account = ProofAccount(email=email, password=password)
 	base_url = env.get('PROOF_BASE_URL', 'https://anyrouter.top').rstrip('/')
 	parsed_base = urlsplit(base_url)
 	if parsed_base.scheme not in {'http', 'https'} or not parsed_base.netloc:
@@ -74,7 +86,7 @@ def parse_proof_config(env: Mapping[str, str]) -> ProofConfig | ConfigFailure:
 	if not egress_salt:
 		return ConfigFailure(Stage.CONFIG, 'egress_salt_required')
 	return ProofConfig(
-		account=ProofAccount(email=email, password=password),
+		account=proof_account,
 		base_url=base_url,
 		egress_url=egress_url,
 		egress_salt=egress_salt,
