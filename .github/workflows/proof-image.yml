@@ -35,7 +35,7 @@ jobs:
         run: uv run --locked pytest tests/test_proof_*.py
 
       - name: Run Ruff on proof code
-        run: uv run --locked ruff check proof_checkin.py proof_harness cloakbrowser.pyi tests/test_proof_*.py
+        run: uv run --locked ruff check proof_checkin.py proof_harness cloakbrowser.pyi httpx.pyi tests/test_proof_*.py
 
       - name: Type-check proof code
         run: >-
@@ -61,7 +61,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          docker run --rm --network none "$IMAGE" >smoke.stdout 2>smoke.stderr
+          timeout --signal=TERM --kill-after=5s 30s docker run --rm --network none "$IMAGE" >smoke.stdout 2>smoke.stderr
           status=$?
           set -e
 

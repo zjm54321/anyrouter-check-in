@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json
 import os
+from typing import TYPE_CHECKING
 
-import httpx
-
-from proof_harness.browser import BrowserFailure, CloakBrowserBoundary
-from proof_harness.config import ConfigFailure, parse_proof_config
+from proof_harness.config import ConfigFailure, ProofConfig, parse_proof_config
 from proof_harness.models import ProofResult, Stage
-from proof_harness.runner import run_proof
+
+if TYPE_CHECKING:
+	def run_valid(_config: ProofConfig) -> ProofResult: ...
+
+
+def _load_valid(config: ProofConfig) -> ProofResult:
+	if not TYPE_CHECKING:
+		from proof_harness.valid_runtime import run_valid
+
+	return run_valid(config)
 
 
 def main() -> int:
@@ -19,11 +25,7 @@ def main() -> int:
 		print(result.model_dump_json())
 		return 1
 	try:
-		result = run_proof(config, CloakBrowserBoundary())
-	except BrowserFailure as error:
-		result = ProofResult(ok=False, stage=Stage.BROWSER_LOGIN, category=error.category)
-	except (httpx.HTTPError, json.JSONDecodeError, TimeoutError):
-		result = ProofResult(ok=False, stage=Stage.PRE_READ, category='bounded_transport_failure')
+		result = _load_valid(config)
 	except Exception:
 		result = ProofResult(ok=False, stage=Stage.BROWSER_LOGIN, category='unexpected_runtime_failure')
 	print(result.model_dump_json())

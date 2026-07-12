@@ -1,11 +1,10 @@
 import json
+from typing import NoReturn
 
 import pytest
 
 import proof_checkin
-from proof_harness.browser import CloakBrowserBoundary
 from proof_harness.config import ProofConfig, parse_proof_config
-from proof_harness.models import ProofResult
 from tests.test_proof_harness import valid_env
 
 
@@ -22,10 +21,10 @@ def test_unexpected_exception_is_one_bounded_sanitized_result(
 
 	monkeypatch.setattr(proof_checkin, 'parse_proof_config', parsed_config)
 
-	def fail(_config: ProofConfig, _browser: CloakBrowserBoundary) -> ProofResult:
+	def fail(_config: ProofConfig) -> NoReturn:
 		raise RuntimeError(secret)
 
-	monkeypatch.setattr(proof_checkin, 'run_proof', fail)
+	monkeypatch.setattr(proof_checkin, '_load_valid', fail)
 
 	# When
 	exit_code = proof_checkin.main()

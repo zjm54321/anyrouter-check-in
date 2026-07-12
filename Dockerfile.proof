@@ -82,4 +82,4 @@ subprocess.run(
 print(json.dumps({'event': 'cloakbrowser_binary_ready', 'version': metadata_version[:128]}, separators=(',', ':')))
 PY
 
-ENTRYPOINT ["xvfb-run", "-a", "uv", "run", "--no-sync", "python", "proof_checkin.py"]
+ENTRYPOINT ["xvfb-run", "-a", ".venv/bin/python", "proof_checkin.py"]

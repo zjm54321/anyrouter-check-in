@@ -86,3 +86,15 @@ def test_proof_image_keeps_supply_chain_and_failure_guards() -> None:
 	assert all('@sha256:' in line for line in from_lines)
 	assert 'CLOAKBROWSER_SKIP_CHECKSUM=true' not in dockerfile
 	assert '|| true' not in dockerfile
+
+
+def test_proof_image_entrypoint_uses_venv_python_directly_under_xvfb() -> None:
+	# Given
+	dockerfile = proof_dockerfile()
+
+	# When
+	entrypoint = next(line for line in dockerfile.splitlines() if line.startswith('ENTRYPOINT '))
+
+	# Then
+	assert entrypoint == 'ENTRYPOINT ["xvfb-run", "-a", ".venv/bin/python", "proof_checkin.py"]'
+	assert 'uv run' not in entrypoint
