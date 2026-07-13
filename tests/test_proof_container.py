@@ -169,7 +169,8 @@ def test_browser_startup_smoke_uses_read_only_ab_with_writable_profile_acceptanc
 	assert "'category': 'output_shape'" in smoke_step
 	assert "'category': 'output_not_json'" in smoke_step
 	assert "'category': 'output_schema'" in smoke_step
-	assert "print(json.dumps({'acceptance': acceptance_payload}, sort_keys=True))" in smoke_step
+	assert "'acceptance_returncode': acceptance.returncode" in smoke_step
+	assert "print(json.dumps({" in smoke_step
 	assert 'smoke.stdout' not in smoke_step
 	assert 'smoke.stderr' not in smoke_step
 

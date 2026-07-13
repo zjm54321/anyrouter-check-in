@@ -147,9 +147,12 @@ jobs:
               '--env', 'XDG_RUNTIME_DIR=/home/cloak/.runtime',
               '--env', 'TMPDIR=/home/cloak',
           ])
-          assert acceptance.returncode == 0
           acceptance_payload = payload(acceptance)
-          print(json.dumps({'acceptance': acceptance_payload}, sort_keys=True))
+          print(json.dumps({
+              'acceptance': acceptance_payload,
+              'acceptance_returncode': acceptance.returncode,
+          }, sort_keys=True))
+          assert acceptance.returncode == 0
           assert acceptance_payload == {
               'category': 'ready',
               'event': 'cloakbrowser_startup_smoke',
