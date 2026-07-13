@@ -1,3 +1,4 @@
+import io
 import json
 from dataclasses import dataclass, field
 from typing import final
@@ -111,6 +112,58 @@ async def test_browser_boundary_uses_reference_flow_and_second_egress_page(
 	assert egress_page.evaluations == []
 	assert session.egress_identity == '198.51.100.10'
 	assert browser.closed is True
+
+
+@pytest.mark.asyncio
+async def test_browser_progress_escapes_helper_redirect_and_brackets_close(
+	monkeypatch: pytest.MonkeyPatch,
+	capfd: pytest.CaptureFixture[str],
+) -> None:
+	# Given
+	env = valid_env()
+	env['PROOF_PROGRESS'] = 'true'
+	config = parse_proof_config(env)
+	assert isinstance(config, ProofConfig)
+	progress_output = io.StringIO()
+	login_page = FakePage('login')
+	egress_page = FakePage('egress', FakeResponse(200, {'identity': '198.51.100.10'}))
+	browser = FakeLaunchedBrowser(FakeContext(login_page, egress_page))
+
+	async def launch(**_kwargs: bool | str | dict[str, str]) -> FakeLaunchedBrowser:
+		return browser
+
+	async def suppressed(*_args: FakePage | str | int) -> None:
+		print('super-secret-password')
+
+	async def verify(_page: FakePage, _url: str, _timeout: int) -> dict[str, int]:
+		print('user@example.test')
+		return {'id': 12345}
+
+	monkeypatch.setattr('proof_harness.browser.launch_async', launch)
+	monkeypatch.setattr('proof_harness.browser.prepare_browser_page', suppressed)
+	monkeypatch.setattr('proof_harness.browser.navigate_login_page', suppressed)
+	monkeypatch.setattr('proof_harness.browser.login_with_email_form', suppressed)
+	monkeypatch.setattr('proof_harness.browser.verify_browser_login', verify)
+	monkeypatch.setattr('proof_harness.models._PROGRESS_OUTPUT', progress_output)
+
+	# When
+	_ = await CloakBrowserBoundary().login_async(config)
+	captured = capfd.readouterr()
+
+	# Then
+	assert captured.err == ''
+	assert progress_output.getvalue().splitlines() == [
+		'{"event":"proof_progress","stage":"browser_launch"}',
+		'{"event":"proof_progress","stage":"login_navigation"}',
+		'{"event":"proof_progress","stage":"form_submission"}',
+		'{"event":"proof_progress","stage":"login_verification"}',
+		'{"event":"proof_progress","stage":"browser_egress"}',
+		'{"event":"proof_progress","stage":"browser_close_start"}',
+		'{"event":"proof_progress","stage":"browser_close_end"}',
+	]
+	emitted = progress_output.getvalue() + captured.out
+	assert 'user@example.test' not in emitted
+	assert 'super-secret-password' not in emitted
 
 
 @pytest.mark.parametrize(

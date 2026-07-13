@@ -13,7 +13,7 @@ from typing_extensions import override
 
 from proof_harness.config import ProofConfig, ProxyMode
 from proof_harness.json_types import parse_json, read_egress_identity
-from proof_harness.models import BrowserSession, Cookie
+from proof_harness.models import BrowserSession, Cookie, ProgressStage, emit_progress
 
 if TYPE_CHECKING:
 	from proof_harness.json_types import JsonObject
@@ -65,6 +65,7 @@ class CloakBrowserBoundary:
 			for key, value in os.environ.items()
 			if key.lower() not in {'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'}
 		}
+		emit_progress(config.progress_enabled, ProgressStage.BROWSER_LAUNCH)
 		if config.proxy_mode is ProxyMode.MIHOMO and config.proxy_url is not None:
 			browser = await launch_async(
 				headless=False,
@@ -80,16 +81,20 @@ class CloakBrowserBoundary:
 			proof_page: ProofPage = page
 			with redirect_stdout(io.StringIO()):
 				await prepare_browser_page(page)
+				emit_progress(config.progress_enabled, ProgressStage.LOGIN_NAVIGATION)
 				await navigate_login_page(page, f'{config.base_url}/login', 30_000)
+				emit_progress(config.progress_enabled, ProgressStage.FORM_SUBMISSION)
 				await login_with_email_form(
 					page,
 					config.account.email,
 					config.account.password,
 					30_000,
 				)
+				emit_progress(config.progress_enabled, ProgressStage.LOGIN_VERIFICATION)
 				profile = await verify_browser_login(page, f'{config.base_url}/console', 30_000)
 			if not isinstance(profile, dict) or not profile.get('id'):
 				raise BrowserFailure('user_self_unverified')
+			emit_progress(config.progress_enabled, ProgressStage.BROWSER_EGRESS)
 			egress_page: ProofPage = await context.new_page()
 			egress_response = await egress_page.goto(config.egress_url, wait_until='load', timeout=30_000)
 			if egress_response is None or egress_response.status != 200:
@@ -118,4 +123,6 @@ class CloakBrowserBoundary:
 				egress_identity=egress_identity,
 			)
 		finally:
+			emit_progress(config.progress_enabled, ProgressStage.BROWSER_CLOSE_START)
 			await browser.close()
+			emit_progress(config.progress_enabled, ProgressStage.BROWSER_CLOSE_END)

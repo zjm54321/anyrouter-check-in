@@ -19,6 +19,17 @@ def test_proof_image_installs_xvfb_run_runtime_dependencies() -> None:
 	assert '\n\t\txauth \\' in installed_packages
 
 
+def test_proof_image_verifies_container_timeout_binary() -> None:
+	# Given
+	dockerfile = proof_dockerfile()
+
+	# When
+	timeout_check = 'RUN test -x /usr/bin/timeout'
+
+	# Then
+	assert timeout_check in dockerfile
+
+
 def test_proof_image_installs_chromium_runtime_dependencies_before_browser() -> None:
 	# Given
 	dockerfile = proof_dockerfile()

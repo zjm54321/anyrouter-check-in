@@ -28,6 +28,7 @@ class ProofConfig:
 	egress_salt: str
 	proxy_mode: ProxyMode
 	proxy_url: str | None
+	progress_enabled: bool = False
 	timeout_seconds: float = 30.0
 
 
@@ -40,6 +41,9 @@ class ConfigFailure:
 def parse_proof_config(env: Mapping[str, str]) -> ProofConfig | ConfigFailure:
 	if env.get('PROOF_MODE', '').strip().lower() != 'true':
 		return ConfigFailure(Stage.CONFIG, 'proof_mode_required')
+	progress_input = env.get('PROOF_PROGRESS')
+	if progress_input not in {None, 'false', 'true'}:
+		return ConfigFailure(Stage.CONFIG, 'progress_invalid')
 	accounts_input = env.get('ANYROUTER_ACCOUNTS')
 	email_input = env.get('ANYROUTER_EMAIL')
 	password_input = env.get('ANYROUTER_PASSWORD')
@@ -92,4 +96,5 @@ def parse_proof_config(env: Mapping[str, str]) -> ProofConfig | ConfigFailure:
 		egress_salt=egress_salt,
 		proxy_mode=proxy_mode,
 		proxy_url=proxy_url,
+		progress_enabled=progress_input == 'true',
 	)

@@ -1,3 +1,4 @@
+import io
 import json
 from dataclasses import dataclass
 
@@ -147,6 +148,55 @@ def test_runner_emits_one_sanitized_result_for_reference_flow() -> None:
 	assert result.cookie_names == ('acw_tc', 'session')
 	assert serialized.count('body_sha256') == 4
 	assert all(value not in serialized for value in FORBIDDEN)
+
+
+def test_runner_progress_has_only_fixed_http_stages(
+	monkeypatch: pytest.MonkeyPatch,
+	capfd: pytest.CaptureFixture[str],
+) -> None:
+	# Given
+	env = valid_env()
+	env['PROOF_PROGRESS'] = 'true'
+	config = parse_proof_config(env)
+	assert isinstance(config, ProofConfig)
+	progress_output = io.StringIO()
+	monkeypatch.setattr('proof_harness.models._PROGRESS_OUTPUT', progress_output)
+
+	def handler(request: httpx.Request) -> httpx.Response:
+		if request.url.path == '/identity':
+			return httpx.Response(
+				200,
+				json={'identity': '198.51.100.10', 'body': 'secret response body'},
+				extensions={'http_version': b'HTTP/2'},
+			)
+		if request.url.path == '/api/user/sign_in':
+			return httpx.Response(200, json={'success': True}, extensions={'http_version': b'HTTP/2'})
+		return httpx.Response(
+			200,
+			json={'success': True, 'data': {'id': 12345, 'body': 'secret response body'}},
+			extensions={'http_version': b'HTTP/2'},
+		)
+
+	# When
+	result = run_proof(
+		config,
+		FakeBrowser(browser_session()),
+		transport=httpx.MockTransport(handler),
+	)
+	captured = capfd.readouterr()
+
+	# Then
+	assert result.ok is True
+	assert captured.err == ''
+	assert progress_output.getvalue().splitlines() == [
+		'{"event":"proof_progress","stage":"http_egress"}',
+		'{"event":"proof_progress","stage":"pre_read"}',
+		'{"event":"proof_progress","stage":"sign_in"}',
+		'{"event":"proof_progress","stage":"post_read"}',
+		'{"event":"proof_progress","stage":"complete"}',
+	]
+	emitted = progress_output.getvalue() + captured.out
+	assert all(value not in emitted for value in (*FORBIDDEN, 'secret response body'))
 
 
 @pytest.mark.parametrize(

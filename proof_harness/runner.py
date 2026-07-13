@@ -7,7 +7,7 @@ import httpx
 
 from proof_harness.config import ProofConfig, ProxyMode
 from proof_harness.json_types import parse_json, read_egress_identity
-from proof_harness.models import BrowserSession, HttpObservation, ProofResult, Stage
+from proof_harness.models import BrowserSession, HttpObservation, ProgressStage, ProofResult, Stage, emit_progress
 
 ALLOWED_COOKIE_NAMES = frozenset({'session', 'acw_tc', 'cdn_sec_tc', 'acw_sc__v2'})
 ALREADY_SIGNED_KEYWORDS = ('已经签到', '已签到', '重复签到', 'already checked', 'already signed')
@@ -119,6 +119,7 @@ def run_proof(
 	) as client:
 		for cookie in session.cookies:
 			client.cookies.set(cookie.name, cookie.value, domain=cookie.domain, path=cookie.path)
+		emit_progress(config.progress_enabled, ProgressStage.HTTP_EGRESS)
 		egress_response = client.get(config.egress_url, headers=headers)
 		observations.append(_observe(Stage.EGRESS, egress_response))
 		if egress_response.http_version != 'HTTP/2':
@@ -133,6 +134,7 @@ def run_proof(
 		if session.egress_identity != http_egress:
 			return _failure(Stage.EGRESS, 'egress_mismatch', session, config, observations, http_egress)
 		user_url = f'{config.base_url}/api/user/self'
+		emit_progress(config.progress_enabled, ProgressStage.PRE_READ)
 		pre = client.get(user_url, headers=headers)
 		observations.append(_observe(Stage.PRE_READ, pre))
 		if pre.http_version != 'HTTP/2':
@@ -141,6 +143,7 @@ def run_proof(
 			category = 'pre_read_non_json' if observations[-1].content_type != 'application/json' else 'pre_read_unverified'
 			return _failure(Stage.PRE_READ, category, session, config, observations, http_egress)
 		sign_headers = {**headers, 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}
+		emit_progress(config.progress_enabled, ProgressStage.SIGN_IN)
 		sign_in = client.post(f'{config.base_url}/api/user/sign_in', headers=sign_headers)
 		observations.append(_observe(Stage.SIGN_IN, sign_in))
 		if sign_in.http_version != 'HTTP/2':
@@ -148,12 +151,14 @@ def run_proof(
 		sign_in_category = _sign_in_category(sign_in)
 		if sign_in_category not in {'sign_in_complete', 'already_signed'}:
 			return _failure(Stage.SIGN_IN, sign_in_category, session, config, observations, http_egress)
+		emit_progress(config.progress_enabled, ProgressStage.POST_READ)
 		post = client.get(user_url, headers=headers)
 		observations.append(_observe(Stage.POST_READ, post))
 		if post.http_version != 'HTTP/2':
 			return _failure(Stage.POST_READ, 'http_protocol_required', session, config, observations, http_egress)
 		if not _verified_user_self(post, session.api_user):
 			return _failure(Stage.POST_READ, 'post_read_unverified', session, config, observations, http_egress)
+	emit_progress(config.progress_enabled, ProgressStage.COMPLETE)
 	return ProofResult(
 		ok=True,
 		stage=Stage.COMPLETE,

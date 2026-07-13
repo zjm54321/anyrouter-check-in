@@ -18,6 +18,7 @@ RUN apt-get update \
 		xauth \
 		xvfb \
 	&& rm -rf /var/lib/apt/lists/*
+RUN test -x /usr/bin/timeout
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./

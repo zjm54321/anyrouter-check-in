@@ -35,6 +35,44 @@ def test_parse_config_preserves_json_mode_when_separate_credentials_are_absent()
 
 
 @pytest.mark.parametrize(
+	('progress_input', 'expected'),
+	[
+		(None, False),
+		('false', False),
+		('true', True),
+	],
+)
+def test_parse_config_accepts_only_explicit_progress_booleans(
+	progress_input: str | None,
+	expected: bool,
+) -> None:
+	# Given
+	env = valid_env()
+	if progress_input is not None:
+		env['PROOF_PROGRESS'] = progress_input
+
+	# When
+	result = parse_proof_config(env)
+
+	# Then
+	assert isinstance(result, ProofConfig)
+	assert result.progress_enabled is expected
+
+
+@pytest.mark.parametrize('progress_input', ['', 'TRUE', 'False', ' true', 'true ', '1', 'yes'])
+def test_parse_config_rejects_invalid_progress_boolean(progress_input: str) -> None:
+	# Given
+	env = valid_env()
+	env['PROOF_PROGRESS'] = progress_input
+
+	# When
+	result = parse_proof_config(env)
+
+	# Then
+	assert result == ConfigFailure(Stage.CONFIG, 'progress_invalid')
+
+
+@pytest.mark.parametrize(
 	'separate_input',
 	[
 		{'ANYROUTER_EMAIL': EMAIL},
