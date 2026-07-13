@@ -89,6 +89,71 @@ jobs:
             exit 1
           fi
 
+      - name: Run credential-free browser startup A/B/A smoke
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        shell: bash
+        run: |
+          IMAGE="$IMAGE" python - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          image = os.environ['IMAGE']
+
+          def run_smoke(extra: list[str]) -> subprocess.CompletedProcess[str]:
+              return subprocess.run(
+                  ['docker', 'run', '--rm', '--network', 'none', '--read-only',
+                   '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
+                   '--tmpfs', '/dev/shm:rw,nosuid,nodev,size=512m',
+                   *extra, '--entrypoint', '/usr/bin/timeout', image,
+                   '--signal=TERM', '--kill-after=5s', '25s',
+                   '/usr/bin/xvfb-run', '-a', '.venv/bin/python',
+                   'proof_browser_smoke.py'],
+                  capture_output=True,
+                  text=True,
+                  timeout=40,
+              )
+
+          def payload(completed: subprocess.CompletedProcess[str]) -> dict[str, str | bool]:
+              assert completed.stderr == ''
+              lines = completed.stdout.splitlines()
+              assert len(lines) == 1
+              value = json.loads(lines[0])
+              assert set(value) == {'category', 'event', 'ok', 'stage'}
+              return value
+
+          baseline = run_smoke([])
+          assert baseline.returncode == 1
+          baseline_payload = payload(baseline)
+          assert baseline_payload == {
+              'category': 'home_unwritable',
+              'event': 'cloakbrowser_startup_smoke',
+              'ok': False,
+              'stage': 'home',
+          }
+
+          acceptance = run_smoke([
+              '--tmpfs', '/home/cloak:rw,nosuid,nodev,size=64m',
+              '--env', 'HOME=/home/cloak',
+              '--env', 'XDG_CONFIG_HOME=/home/cloak/.config',
+              '--env', 'XDG_CACHE_HOME=/home/cloak/.cache',
+              '--env', 'XDG_RUNTIME_DIR=/home/cloak/.runtime',
+              '--env', 'TMPDIR=/home/cloak',
+          ])
+          assert acceptance.returncode == 0
+          assert payload(acceptance) == {
+              'category': 'ready',
+              'event': 'cloakbrowser_startup_smoke',
+              'ok': True,
+              'stage': 'complete',
+          }
+
+          repeated_baseline = run_smoke([])
+          assert repeated_baseline.returncode == baseline.returncode
+          assert payload(repeated_baseline) == baseline_payload
+          PY
+
       - name: Log in to GHCR
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}

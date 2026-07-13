@@ -111,6 +111,21 @@ def test_proof_image_entrypoint_uses_venv_python_directly_under_xvfb() -> None:
 	assert 'uv run' not in entrypoint
 
 
+def test_proof_image_exposes_only_the_baked_browser_binary_at_runtime() -> None:
+	# Given
+	dockerfile = proof_dockerfile()
+
+	# When
+	runtime_contract = dockerfile.split("runtime_link = Path('/opt/cloakbrowser')", 1)[1]
+
+	# Then
+	assert "runtime_link.symlink_to(resolved_path.parent" in runtime_contract
+	assert "runtime_path.resolve(strict=True) != resolved_path" in runtime_contract
+	assert 'ENV CLOAKBROWSER_AUTO_UPDATE=false' in runtime_contract
+	assert 'CLOAKBROWSER_BINARY_PATH=/opt/cloakbrowser/chrome' in runtime_contract
+	assert 'COPY checkin.py proof_checkin.py proof_browser_smoke.py ./' in dockerfile
+
+
 def test_credential_free_smoke_bypasses_browser_entrypoint() -> None:
 	# Given
 	workflow = Path('.github/workflows/proof-image.yml').read_text(encoding='utf-8')
@@ -124,3 +139,52 @@ def test_credential_free_smoke_bypasses_browser_entrypoint() -> None:
 	# Then
 	assert 'docker run --entrypoint .venv/bin/python' in smoke_step
 	assert 'proof_checkin.py' in smoke_step
+
+
+def test_browser_startup_smoke_uses_read_only_ab_with_writable_profile_acceptance() -> None:
+	# Given
+	workflow = Path('.github/workflows/proof-image.yml').read_text(encoding='utf-8')
+
+	# When
+	smoke_step = workflow.split('name: Run credential-free browser startup A/B/A smoke', 1)[1].split(
+		'- name: Log in to GHCR',
+		1,
+	)[0]
+
+	# Then
+	assert "'--network', 'none'" in smoke_step
+	assert "'--read-only'" in smoke_step
+	assert "'--tmpfs', '/tmp:" in smoke_step
+	assert "'--tmpfs', '/dev/shm:" in smoke_step
+	assert "'--tmpfs', '/home/cloak:" in smoke_step
+	assert 'HOME=/home/cloak' in smoke_step
+	assert 'XDG_CONFIG_HOME=/home/cloak/.config' in smoke_step
+	assert 'XDG_CACHE_HOME=/home/cloak/.cache' in smoke_step
+	assert 'XDG_RUNTIME_DIR=/home/cloak/.runtime' in smoke_step
+	assert 'TMPDIR=/home/cloak' in smoke_step
+	assert 'proof_browser_smoke.py' in smoke_step
+	assert 'timeout=' in smoke_step
+	assert 'capture_output=True' in smoke_step
+	assert "assert completed.stderr == ''" in smoke_step
+	assert 'smoke.stdout' not in smoke_step
+	assert 'smoke.stderr' not in smoke_step
+
+
+def test_browser_startup_smoke_repeats_baseline_after_acceptance() -> None:
+	# Given
+	workflow = Path('.github/workflows/proof-image.yml').read_text(encoding='utf-8')
+
+	# When
+	smoke_step = workflow.split('name: Run credential-free browser startup A/B/A smoke', 1)[1].split(
+		'- name: Log in to GHCR',
+		1,
+	)[0]
+
+	# Then
+	baseline_position = smoke_step.index('baseline = run_smoke([])')
+	acceptance_position = smoke_step.index('acceptance = run_smoke([')
+	repeated_position = smoke_step.index('repeated_baseline = run_smoke([])')
+	assert baseline_position < acceptance_position < repeated_position
+	assert 'baseline_payload = payload(baseline)' in smoke_step
+	assert 'assert repeated_baseline.returncode == baseline.returncode' in smoke_step
+	assert 'assert payload(repeated_baseline) == baseline_payload' in smoke_step

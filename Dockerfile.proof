@@ -25,7 +25,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev
 RUN uv run --locked --no-dev playwright install-deps chromium \
 	&& rm -rf /var/lib/apt/lists/*
-COPY checkin.py proof_checkin.py ./
+COPY checkin.py proof_checkin.py proof_browser_smoke.py ./
 COPY proof_harness ./proof_harness
 COPY utils ./utils
 RUN CLOAKBROWSER_AUTO_UPDATE=false CLOAKBROWSER_SKIP_CHECKSUM=false .venv/bin/python - <<'PY'
@@ -73,6 +73,14 @@ metadata_version = binary_metadata['version']
 if not isinstance(metadata_version, str) or not metadata_version.strip():
 	raise TypeError('binary_info() must return a nonempty string version')
 
+runtime_link = Path('/opt/cloakbrowser')
+if runtime_link.exists() or runtime_link.is_symlink():
+	raise RuntimeError('runtime binary link already exists')
+runtime_link.symlink_to(resolved_path.parent, target_is_directory=True)
+runtime_path = runtime_link / resolved_path.name
+if runtime_path.resolve(strict=True) != resolved_path:
+	raise RuntimeError('runtime binary link does not resolve to the installed binary')
+
 subprocess.run(
 	[str(resolved_path), '--version'],
 	check=True,
@@ -82,5 +90,8 @@ subprocess.run(
 )
 print(json.dumps({'event': 'cloakbrowser_binary_ready', 'version': metadata_version[:128]}, separators=(',', ':')))
 PY
+
+ENV CLOAKBROWSER_AUTO_UPDATE=false \
+    CLOAKBROWSER_BINARY_PATH=/opt/cloakbrowser/chrome
 
 ENTRYPOINT ["xvfb-run", "-a", ".venv/bin/python", "proof_checkin.py"]
