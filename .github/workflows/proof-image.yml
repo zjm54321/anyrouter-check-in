@@ -115,19 +115,19 @@ jobs:
                   timeout=40,
               )
 
-           def payload(completed: subprocess.CompletedProcess[str]) -> dict[str, str | bool]:
-               if completed.stderr != '':
-                   return {'category': 'stderr_nonempty', 'event': 'workflow_smoke', 'ok': False, 'stage': 'output'}
-               lines = completed.stdout.splitlines()
-               if len(lines) != 1:
-                   return {'category': 'output_shape', 'event': 'workflow_smoke', 'ok': False, 'stage': 'output'}
-               try:
-                   value = json.loads(lines[0])
-               except json.JSONDecodeError:
-                   return {'category': 'output_not_json', 'event': 'workflow_smoke', 'ok': False, 'stage': 'output'}
-               if not isinstance(value, dict) or set(value) != {'category', 'event', 'ok', 'stage'}:
-                   return {'category': 'output_schema', 'event': 'workflow_smoke', 'ok': False, 'stage': 'output'}
-               return value
+          def payload(completed: subprocess.CompletedProcess[str]) -> dict[str, str | bool]:
+              if completed.stderr != '':
+                  return {'category': 'stderr_nonempty', 'event': 'workflow_smoke', 'ok': False, 'stage': 'output'}
+              lines = completed.stdout.splitlines()
+              if len(lines) != 1:
+                  return {'category': 'output_shape', 'event': 'workflow_smoke', 'ok': False, 'stage': 'output'}
+              try:
+                  value = json.loads(lines[0])
+              except json.JSONDecodeError:
+                  return {'category': 'output_not_json', 'event': 'workflow_smoke', 'ok': False, 'stage': 'output'}
+              if not isinstance(value, dict) or set(value) != {'category', 'event', 'ok', 'stage'}:
+                  return {'category': 'output_schema', 'event': 'workflow_smoke', 'ok': False, 'stage': 'output'}
+              return value
 
           baseline = run_smoke([])
           assert baseline.returncode == 1
