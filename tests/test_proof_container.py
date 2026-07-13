@@ -166,6 +166,7 @@ def test_browser_startup_smoke_uses_read_only_ab_with_writable_profile_acceptanc
 	assert 'timeout=' in smoke_step
 	assert 'capture_output=True' in smoke_step
 	assert "assert completed.stderr == ''" in smoke_step
+	assert "print(json.dumps({'acceptance': acceptance_payload}, sort_keys=True))" in smoke_step
 	assert 'smoke.stdout' not in smoke_step
 	assert 'smoke.stderr' not in smoke_step
 
