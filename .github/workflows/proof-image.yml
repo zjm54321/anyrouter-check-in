@@ -3,9 +3,7 @@ name: Publish proof image
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
+permissions: {}
 
 concurrency:
   group: proof-image-${{ github.sha }}
@@ -14,6 +12,12 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_repository: ${{ steps.image.outputs.repository }}
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Check out repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
@@ -48,6 +52,7 @@ jobs:
         run: |
           image_repository="$(printf '%s' "ghcr.io/${GITHUB_REPOSITORY_OWNER}/anyrouter-reference-proof" | tr '[:upper:]' '[:lower:]')"
           image="${image_repository}:${GITHUB_SHA}"
+          echo "repository=${image_repository}" >> "$GITHUB_OUTPUT"
           echo "image=${image}" >> "$GITHUB_OUTPUT"
 
       - name: Build linux/amd64 proof image
@@ -198,3 +203,64 @@ jobs:
         run: |
           echo '## Proof image published' >> "$GITHUB_STEP_SUMMARY"
           echo "\`${IMAGE}@${DIGEST}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  post_publish_browser_smoke:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    steps:
+      - name: Log in to GHCR for immutable pull
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Pull and smoke exact published image
+        env:
+          IMAGE_REPOSITORY: ${{ needs.publish.outputs.image_repository }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_REFERENCE="${IMAGE_REPOSITORY}@${DIGEST}"
+
+          docker pull --platform linux/amd64 "$IMAGE_REFERENCE"
+          docker image inspect "$IMAGE_REFERENCE" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep -Fx -- "$IMAGE_REFERENCE"
+          test "$(docker image inspect "$IMAGE_REFERENCE" --format '{{.Architecture}}')" = 'amd64'
+          docker logout ghcr.io
+
+          set +e
+          timeout --signal=TERM --kill-after=5s 40s docker run \
+            --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+            --tmpfs /dev/shm:rw,nosuid,nodev,size=512m \
+            --tmpfs /home/cloak:rw,nosuid,nodev,size=64m \
+            --env HOME=/home/cloak \
+            --env XDG_CONFIG_HOME=/home/cloak/.config \
+            --env XDG_CACHE_HOME=/home/cloak/.cache \
+            --env XDG_RUNTIME_DIR=/home/cloak/.runtime \
+            --env TMPDIR=/home/cloak \
+            --entrypoint /usr/bin/timeout \
+            "$IMAGE_REFERENCE" \
+            --signal=TERM --kill-after=5s 25s /usr/bin/xvfb-run -a .venv/bin/python proof_browser_smoke.py \
+            >smoke.stdout 2>smoke.stderr
+          status=$?
+          set -e
+
+          test "$status" -eq 0
+          test ! -s smoke.stderr
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          lines = Path('smoke.stdout').read_text(encoding='utf-8').splitlines()
+          assert len(lines) == 1, lines
+          assert json.loads(lines[0]) == {
+              'category': 'ready',
+              'event': 'cloakbrowser_startup_smoke',
+              'ok': True,
+              'stage': 'complete',
+          }
+          PY

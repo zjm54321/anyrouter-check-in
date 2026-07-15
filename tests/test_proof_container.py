@@ -193,3 +193,73 @@ def test_browser_startup_smoke_repeats_baseline_after_acceptance() -> None:
 	assert 'baseline_payload = payload(baseline)' in smoke_step
 	assert 'assert repeated_baseline.returncode == baseline.returncode' in smoke_step
 	assert 'assert payload(repeated_baseline) == baseline_payload' in smoke_step
+
+
+def test_post_publish_browser_smoke_uses_immutable_digest_on_fresh_runner() -> None:
+	# Given
+	workflow = Path('.github/workflows/proof-image.yml').read_text(encoding='utf-8')
+	job_marker = '\n  post_publish_browser_smoke:\n'
+
+	# When
+	workflow_header = workflow.split('\njobs:\n', 1)[0]
+	publish_job = workflow.split('\n  publish:\n', 1)[1].split(job_marker, 1)[0]
+	post_publish_job = workflow.partition(job_marker)[2]
+	login_step = post_publish_job.partition('GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}')[2].partition(
+		'\n\n      - ',
+	)[0]
+	smoke_step = post_publish_job.partition(
+		'IMAGE_REPOSITORY: ${{ needs.publish.outputs.image_repository }}',
+	)[2]
+	action_refs = [line.strip().split('uses: ', 1)[1] for line in workflow.splitlines() if 'uses: ' in line]
+
+	# Then
+	assert post_publish_job
+	assert 'permissions: {}' in workflow_header
+	assert 'packages:' not in workflow_header
+	assert 'outputs:\n      image_repository: ${{ steps.image.outputs.repository }}' in publish_job
+	assert 'digest: ${{ steps.push.outputs.digest }}' in publish_job
+	assert 'permissions:\n      contents: read\n      packages: write' in publish_job
+	assert 'needs: publish' in post_publish_job
+	assert 'runs-on: ubuntu-latest' in post_publish_job
+	assert 'permissions:\n      packages: read' in post_publish_job
+	assert 'packages: write' not in post_publish_job
+	assert action_refs
+	assert all('@' in reference and len(reference.rsplit('@', 1)[1]) == 40 for reference in action_refs)
+	assert login_step
+	assert 'docker login ghcr.io' in login_step
+	assert '--password-stdin' in login_step
+
+	assert smoke_step
+	assert 'DIGEST: ${{ needs.publish.outputs.digest }}' in smoke_step
+	assert 'IMAGE_REFERENCE="${IMAGE_REPOSITORY}@${DIGEST}"' in smoke_step
+	assert 'docker pull --platform linux/amd64 "$IMAGE_REFERENCE"' in smoke_step
+	assert "grep -Fx -- \"$IMAGE_REFERENCE\"" in smoke_step
+	assert "--format '{{.Architecture}}'" in smoke_step
+	assert "= 'amd64'" in smoke_step
+	assert 'timeout --signal=TERM --kill-after=5s 40s docker run' in smoke_step
+	assert '--network none' in smoke_step
+	assert '--read-only' in smoke_step
+	assert '--tmpfs /tmp:rw,nosuid,nodev,size=256m' in smoke_step
+	assert '--tmpfs /dev/shm:rw,nosuid,nodev,size=512m' in smoke_step
+	assert '--tmpfs /home/cloak:rw,nosuid,nodev,size=64m' in smoke_step
+	assert '--env HOME=/home/cloak' in smoke_step
+	assert '--env XDG_CONFIG_HOME=/home/cloak/.config' in smoke_step
+	assert '--env XDG_CACHE_HOME=/home/cloak/.cache' in smoke_step
+	assert '--env XDG_RUNTIME_DIR=/home/cloak/.runtime' in smoke_step
+	assert '--env TMPDIR=/home/cloak' in smoke_step
+	assert '--entrypoint /usr/bin/timeout' in smoke_step
+	assert '--kill-after=5s 25s /usr/bin/xvfb-run -a .venv/bin/python proof_browser_smoke.py' in smoke_step
+	assert 'test "$status" -eq 0' in smoke_step
+	assert 'test ! -s smoke.stderr' in smoke_step
+	assert 'assert len(lines) == 1' in smoke_step
+	assert "assert json.loads(lines[0]) == {" in smoke_step
+	assert "'category': 'ready'" in smoke_step
+	assert "'event': 'cloakbrowser_startup_smoke'" in smoke_step
+	assert "'ok': True" in smoke_step
+	assert "'stage': 'complete'" in smoke_step
+	assert 'secrets.' not in smoke_step
+	assert 'GITHUB_TOKEN' not in smoke_step
+	assert 'GHCR_TOKEN' not in smoke_step
+	assert 'PROXY' not in smoke_step.upper()
+	assert 'http://' not in smoke_step
+	assert 'https://' not in smoke_step
