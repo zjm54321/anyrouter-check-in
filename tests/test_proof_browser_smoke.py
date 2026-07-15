@@ -57,11 +57,15 @@ class SlowCloseBrowser:
 def smoke_env(tmp_path: str, binary: str = sys.executable) -> dict[str, str]:
 	home = os.path.join(tmp_path, 'home')
 	return {
+		'ANYROUTER_ACCOUNTS': 'credential-sentinel',
+		'CHECKIN_PROXY_URL': 'proxy-sentinel',
 		'CLOAKBROWSER_BINARY_PATH': binary,
 		'DISPLAY': ':99',
 		'HOME': home,
 		'PATH': os.environ['PATH'],
+		'PROVIDERS': 'application-sentinel',
 		'TMPDIR': os.path.join(home, '.runtime'),
+		'XAUTHORITY': os.path.join(tmp_path, 'xvfb-run.opaque', 'Xauthority'),
 		'XDG_CACHE_HOME': os.path.join(home, '.cache'),
 		'XDG_CONFIG_HOME': os.path.join(home, '.config'),
 		'XDG_RUNTIME_DIR': os.path.join(home, '.runtime'),
@@ -77,16 +81,32 @@ async def test_startup_smoke_uses_about_blank_and_returns_canonical_success(
 	diagnostic = diagnostic_module()
 	page = FakePage()
 	browser = FakeBrowser(FakeContext(page))
-	calls: list[dict[str, bool | str | dict[str, str]]] = []
+	calls: list[dict[str, bool | dict[str, str]]] = []
+	forwarded_envs: list[dict[str, str]] = []
 
-	async def launch(**kwargs: bool | str | dict[str, str]) -> FakeBrowser:
-		calls.append(kwargs)
+	async def launch(*, headless: bool, humanize: bool, env: dict[str, str]) -> FakeBrowser:
+		calls.append({'env': env, 'headless': headless, 'humanize': humanize})
+		forwarded_envs.append(env)
 		return browser
 
 	monkeypatch.setattr(diagnostic, 'launch_async', launch)
+	env = smoke_env(str(tmp_path))
+	expected_browser_env = {
+		name: env[name]
+		for name in (
+			'DISPLAY',
+			'HOME',
+			'PATH',
+			'TMPDIR',
+			'XAUTHORITY',
+			'XDG_CACHE_HOME',
+			'XDG_CONFIG_HOME',
+			'XDG_RUNTIME_DIR',
+		)
+	}
 
 	# When
-	result = await diagnostic.run_diagnostic(smoke_env(str(tmp_path)))
+	result = await diagnostic.run_diagnostic(env)
 
 	# Then
 	assert result.to_json() == (
@@ -94,7 +114,8 @@ async def test_startup_smoke_uses_about_blank_and_returns_canonical_success(
 	)
 	assert page.navigations == ['about:blank']
 	assert browser.closed is True
-	assert calls == [{'env': calls[0]['env'], 'headless': False, 'humanize': False}]
+	assert calls == [{'env': expected_browser_env, 'headless': False, 'humanize': False}]
+	assert {'ANYROUTER_ACCOUNTS', 'CHECKIN_PROXY_URL', 'PROVIDERS'}.isdisjoint(forwarded_envs[0])
 
 
 @pytest.mark.asyncio
