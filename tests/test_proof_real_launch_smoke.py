@@ -1,0 +1,193 @@
+import os
+import sys
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TypedDict
+
+import pytest
+
+
+def real_diagnostic_module():
+	import proof_harness.real_launch_diagnostic as diagnostic
+
+	return diagnostic
+
+
+class LaunchKwargs(TypedDict):
+	args: tuple[str, ...]
+	env: Mapping[str, str]
+	headless: bool
+	humanize: bool
+
+
+@dataclass(slots=True)
+class FakePage:
+	prepared: bool = False
+
+
+@dataclass(slots=True)
+class FakeContext:
+	page: FakePage
+	viewport: dict[str, int] | None = None
+
+	async def new_page(self) -> FakePage:
+		return self.page
+
+
+@dataclass(slots=True)
+class FakeBrowser:
+	context: FakeContext
+	closed: bool = False
+
+	async def new_context(self, *, viewport: dict[str, int]) -> FakeContext:
+		self.context.viewport = viewport
+		return self.context
+
+	async def close(self) -> None:
+		self.closed = True
+
+
+def smoke_env(tmp_path: Path, humanize: str = 'true') -> dict[str, str]:
+	home = tmp_path / 'home'
+	return {
+		'CLOAKBROWSER_BINARY_PATH': sys.executable,
+		'DISPLAY': ':99',
+		'HOME': str(home),
+		'PATH': os.environ['PATH'],
+		'PROOF_HUMANIZE': humanize,
+		'TMPDIR': str(home / '.runtime'),
+		'XAUTHORITY': str(tmp_path / 'xvfb-run' / 'Xauthority'),
+		'XDG_CACHE_HOME': str(home / '.cache'),
+		'XDG_CONFIG_HOME': str(home / '.config'),
+		'XDG_RUNTIME_DIR': str(home / '.runtime'),
+	}
+
+
+@pytest.mark.asyncio
+async def test_real_launch_smoke_reaches_prepare_without_navigation(
+	monkeypatch: pytest.MonkeyPatch,
+	tmp_path: Path,
+) -> None:
+	# Given
+	diagnostic = real_diagnostic_module()
+	page = FakePage()
+	browser = FakeBrowser(FakeContext(page))
+	calls: list[LaunchKwargs] = []
+
+	async def launch(
+		*,
+		args: Sequence[str] | None,
+		env: Mapping[str, str],
+		headless: bool,
+		humanize: bool,
+	) -> FakeBrowser:
+		calls.append({
+			'args': tuple(args or ()),
+			'env': env,
+			'headless': headless,
+			'humanize': humanize,
+		})
+		return browser
+
+	async def prepare(_page: FakePage) -> None:
+		page.prepared = True
+
+	monkeypatch.setattr(diagnostic, 'launch_async', launch)
+	monkeypatch.setattr(diagnostic, 'prepare_browser_page', prepare)
+	env = smoke_env(tmp_path)
+
+	# When
+	result = await diagnostic.run_diagnostic(env)
+
+	# Then
+	expected_env = {
+		key: value
+		for key, value in env.items()
+		if key.lower() not in {'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'}
+	}
+	assert result.to_json() == (
+		'{"category":"ready","event":"cloakbrowser_proof_launch_smoke",'
+		'"ok":true,"stage":"complete"}'
+	)
+	assert calls == [{
+		'args': ('--fingerprint=42424',),
+		'env': expected_env,
+		'headless': False,
+		'humanize': True,
+	}]
+	assert browser.context.viewport == {'width': 1920, 'height': 1080}
+	assert page.prepared is True
+	assert browser.closed is True
+
+
+@pytest.mark.asyncio
+async def test_real_launch_smoke_classifies_prepare_failure_without_leak(
+	monkeypatch: pytest.MonkeyPatch,
+	tmp_path: Path,
+) -> None:
+	# Given
+	diagnostic = real_diagnostic_module()
+	browser = FakeBrowser(FakeContext(FakePage()))
+
+	async def launch(
+		*,
+		args: Sequence[str] | None,
+		env: Mapping[str, str],
+		headless: bool,
+		humanize: bool,
+	) -> FakeBrowser:
+		_ = args, env, headless, humanize
+		return browser
+
+	async def prepare(_page: FakePage) -> None:
+		raise RuntimeError('secret/path/credential')
+
+	monkeypatch.setattr(diagnostic, 'launch_async', launch)
+	monkeypatch.setattr(diagnostic, 'prepare_browser_page', prepare)
+
+	# When
+	result = await diagnostic.run_diagnostic(smoke_env(tmp_path))
+
+	# Then
+	assert result.to_json() == (
+		'{"category":"prepare_failed","event":"cloakbrowser_proof_launch_smoke",'
+		'"ok":false,"stage":"prepare"}'
+	)
+	assert 'credential' not in result.to_json()
+	assert browser.closed is True
+
+
+@pytest.mark.asyncio
+async def test_real_launch_smoke_forwards_false_humanize_mode(
+	monkeypatch: pytest.MonkeyPatch,
+	tmp_path: Path,
+) -> None:
+	# Given
+	diagnostic = real_diagnostic_module()
+	browser = FakeBrowser(FakeContext(FakePage()))
+	observed: list[bool] = []
+
+	async def launch(
+		*,
+		args: Sequence[str] | None,
+		env: Mapping[str, str],
+		headless: bool,
+		humanize: bool,
+	) -> FakeBrowser:
+		_ = args, env, headless
+		observed.append(not humanize)
+		return browser
+
+	async def prepare(_page: FakePage) -> None:
+		return None
+
+	monkeypatch.setattr(diagnostic, 'launch_async', launch)
+	monkeypatch.setattr(diagnostic, 'prepare_browser_page', prepare)
+
+	# When
+	result = await diagnostic.run_diagnostic(smoke_env(tmp_path, humanize='false'))
+
+	# Then
+	assert result.ok is True
+	assert observed == [True]

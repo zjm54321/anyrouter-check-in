@@ -123,7 +123,7 @@ def test_proof_image_exposes_only_the_baked_browser_binary_at_runtime() -> None:
 	assert "runtime_path.resolve(strict=True) != resolved_path" in runtime_contract
 	assert 'ENV CLOAKBROWSER_AUTO_UPDATE=false' in runtime_contract
 	assert 'CLOAKBROWSER_BINARY_PATH=/opt/cloakbrowser/chrome' in runtime_contract
-	assert 'COPY checkin.py proof_checkin.py proof_browser_smoke.py ./' in dockerfile
+	assert 'COPY checkin.py proof_checkin.py proof_browser_smoke.py proof_real_launch_smoke.py ./' in dockerfile
 
 
 def test_credential_free_smoke_bypasses_browser_entrypoint() -> None:

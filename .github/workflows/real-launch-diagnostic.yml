@@ -1,0 +1,111 @@
+name: Diagnose real proof launch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: '0.11.28'
+
+      - name: Install locked development dependencies
+        run: uv sync --locked --dev
+
+      - name: Run diagnostic tests
+        run: uv run --locked pytest tests/test_proof_real_launch_smoke.py tests/test_real_launch_workflow.py
+
+      - name: Run Ruff
+        run: uv run --locked ruff check proof_real_launch_smoke.py proof_harness/real_launch_diagnostic.py tests/test_proof_real_launch_smoke.py tests/test_real_launch_workflow.py
+
+      - name: Type-check diagnostic
+        run: >-
+          uvx --from basedpyright==1.39.3 basedpyright
+          proof_real_launch_smoke.py proof_harness/real_launch_diagnostic.py
+          cloakbrowser.pyi tests/test_proof_real_launch_smoke.py
+          tests/test_real_launch_workflow.py
+
+      - name: Build one diagnostic image
+        env:
+          IMAGE: real-launch-diagnostic:${{ github.sha }}
+        run: docker build --platform linux/amd64 --file Dockerfile.proof --tag "$IMAGE" .
+
+      - name: Run humanize A/B/A diagnostic
+        env:
+          IMAGE: real-launch-diagnostic:${{ github.sha }}
+        shell: bash
+        run: |
+          IMAGE="$IMAGE" python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          image = os.environ['IMAGE']
+          accepted_categories = {
+              'binary_path_unavailable',
+              'close_failed',
+              'close_timeout',
+              'config_invalid',
+              'context_failed',
+              'context_timeout',
+              'display_unavailable',
+              'home_unwritable',
+              'launch_failed',
+              'launch_timeout',
+              'page_failed',
+              'page_timeout',
+              'prepare_failed',
+              'prepare_timeout',
+              'ready',
+          }
+
+          def run_case(value: str) -> tuple[int, dict[str, object]]:
+              completed = subprocess.run(
+                  [
+                      'docker', 'run', '--rm', '--network', 'none', '--read-only',
+                      '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
+                      '--tmpfs', '/dev/shm:rw,nosuid,nodev,size=512m',
+                      '--tmpfs', '/home/cloak:rw,nosuid,nodev,size=64m',
+                      '--env', 'HOME=/home/cloak',
+                      '--env', 'XDG_CONFIG_HOME=/home/cloak/.config',
+                      '--env', 'XDG_CACHE_HOME=/home/cloak/.cache',
+                      '--env', 'XDG_RUNTIME_DIR=/home/cloak/.runtime',
+                      '--env', 'TMPDIR=/home/cloak',
+                      '--env', f'PROOF_HUMANIZE={value}',
+                      '--entrypoint', '/usr/bin/timeout', image,
+                      '--signal=TERM', '--kill-after=5s', '55s',
+                      '/usr/bin/xvfb-run', '-a', '.venv/bin/python',
+                      'proof_real_launch_smoke.py',
+                  ],
+                  capture_output=True,
+                  text=True,
+                  timeout=70,
+              )
+              assert completed.stderr == '', completed.stderr
+              lines = completed.stdout.splitlines()
+              assert len(lines) == 1, lines
+              payload = json.loads(lines[0])
+              assert set(payload) == {'category', 'event', 'ok', 'stage'}, payload
+              assert payload['event'] == 'cloakbrowser_proof_launch_smoke', payload
+              assert payload['category'] in accepted_categories, payload
+              assert completed.returncode in {0, 1}, completed.returncode
+              return completed.returncode, payload
+
+          results = [run_case(value) for value in ('true', 'false', 'true')]
+          print(json.dumps({'cases': [payload for _, payload in results]}, sort_keys=True))
+          assert results[0] == results[2], results
+          PY
