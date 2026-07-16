@@ -18,7 +18,7 @@ from utils.browser import prepare_browser_page
 
 DIAGNOSTIC_TIMEOUT_SECONDS: Final = 20.0
 _PROXY_NAMES: Final = frozenset({'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'})
-_FINGERPRINT_ARGS: Final = ('--fingerprint=42424',)
+_DEFAULT_FINGERPRINT_SEED: Final = 42424
 _ALLOWLIST_ENV_NAMES: Final = (
 	'DISPLAY',
 	'HOME',
@@ -119,10 +119,24 @@ def _fingerprint_mode(env: Mapping[str, str]) -> FingerprintMode | None:
 		return None
 
 
-def _fingerprint_args(mode: FingerprintMode) -> tuple[str, ...] | None:
+def _fingerprint_seed(env: Mapping[str, str]) -> int | None:
+	raw_seed = env.get('PROOF_FINGERPRINT_SEED', str(_DEFAULT_FINGERPRINT_SEED))
+	try:
+		seed = int(raw_seed)
+	except ValueError:
+		return None
+	if 10000 <= seed <= 99999:
+		return seed
+	return None
+
+
+def _fingerprint_args(
+	mode: FingerprintMode,
+	seed: int,
+) -> tuple[str, ...] | None:
 	match mode:
 		case FingerprintMode.FIXED:
-			return _FINGERPRINT_ARGS
+			return (f'--fingerprint={seed}',)
 		case FingerprintMode.DEFAULT:
 			return None
 
@@ -187,9 +201,15 @@ async def run_diagnostic(env: Mapping[str, str]) -> DiagnosticResult:
 	humanize = _humanize_enabled(env)
 	environment_mode = _environment_mode(env)
 	fingerprint_mode = _fingerprint_mode(env)
-	if humanize is None or environment_mode is None or fingerprint_mode is None:
+	fingerprint_seed = _fingerprint_seed(env)
+	if (
+		humanize is None
+		or environment_mode is None
+		or fingerprint_mode is None
+		or fingerprint_seed is None
+	):
 		return _result(Category.CONFIG_INVALID, Stage.LAUNCH)
-	fingerprint_args = _fingerprint_args(fingerprint_mode)
+	fingerprint_args = _fingerprint_args(fingerprint_mode, fingerprint_seed)
 
 	stage = Stage.LAUNCH
 	browser: Browser | None = None
