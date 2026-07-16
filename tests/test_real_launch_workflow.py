@@ -9,7 +9,10 @@ def test_real_launch_diagnostic_is_baked_into_image_and_workflow_is_credential_f
 	workflow = (ROOT / '.github' / 'workflows' / 'real-launch-diagnostic.yml').read_text(encoding='utf-8')
 
 	# Then
-	assert 'COPY checkin.py proof_checkin.py proof_browser_smoke.py proof_real_launch_smoke.py ./' in dockerfile
+	assert (
+		'COPY checkin.py proof_checkin.py proof_browser_smoke.py proof_real_launch_smoke.py '
+		'proof_exact_boundary_smoke.py ./'
+	) in dockerfile
 	assert "for loop_mode in ('asyncio', 'anyio', 'asyncio')" in workflow
 	assert "'--env', 'PROOF_ENV_MODE=full'" in workflow
 	assert "'--env', 'PROOF_FINGERPRINT_MODE=default'" in workflow

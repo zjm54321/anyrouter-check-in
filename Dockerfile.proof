@@ -25,7 +25,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev
 RUN uv run --locked --no-dev playwright install-deps chromium \
 	&& rm -rf /var/lib/apt/lists/*
-COPY checkin.py proof_checkin.py proof_browser_smoke.py proof_real_launch_smoke.py ./
+COPY checkin.py proof_checkin.py proof_browser_smoke.py proof_real_launch_smoke.py proof_exact_boundary_smoke.py ./
 COPY proof_harness ./proof_harness
 COPY utils ./utils
 RUN CLOAKBROWSER_AUTO_UPDATE=false CLOAKBROWSER_SKIP_CHECKSUM=false .venv/bin/python - <<'PY'
