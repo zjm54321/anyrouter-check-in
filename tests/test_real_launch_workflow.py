@@ -12,8 +12,7 @@ def test_real_launch_diagnostic_is_baked_into_image_and_workflow_is_credential_f
 	assert 'COPY checkin.py proof_checkin.py proof_browser_smoke.py proof_real_launch_smoke.py ./' in dockerfile
 	assert "for value in ('true', 'false', 'true')" in workflow
 	assert "'--env', 'PROOF_ENV_MODE=full'" in workflow
-	assert "'--env', 'PROOF_FINGERPRINT_MODE=fixed'" in workflow
-	assert "'--env', 'PROOF_FINGERPRINT_SEED=12345'" in workflow
+	assert "'--env', 'PROOF_FINGERPRINT_MODE=default'" in workflow
 	assert "'--env', f'PROOF_HUMANIZE={value}'" in workflow
 	assert "'--network', 'none'" in workflow
 	assert "'--read-only'" in workflow
