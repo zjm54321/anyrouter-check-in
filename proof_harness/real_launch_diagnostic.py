@@ -19,6 +19,18 @@ from utils.browser import prepare_browser_page
 DIAGNOSTIC_TIMEOUT_SECONDS: Final = 20.0
 _PROXY_NAMES: Final = frozenset({'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'})
 _FINGERPRINT_ARGS: Final = ('--fingerprint=42424',)
+_ALLOWLIST_ENV_NAMES: Final = (
+	'DISPLAY',
+	'HOME',
+	'LANG',
+	'LC_ALL',
+	'PATH',
+	'TMPDIR',
+	'XAUTHORITY',
+	'XDG_CACHE_HOME',
+	'XDG_CONFIG_HOME',
+	'XDG_RUNTIME_DIR',
+)
 
 
 class Stage(StrEnum):
@@ -51,6 +63,11 @@ class Category(StrEnum):
 	READY = 'ready'
 
 
+class EnvironmentMode(StrEnum):
+	FULL = 'full'
+	ALLOWLIST = 'allowlist'
+
+
 @dataclass(frozen=True, slots=True)
 class DiagnosticResult:
 	category: Category
@@ -74,10 +91,6 @@ def _result(category: Category, stage: Stage, ok: bool = False) -> DiagnosticRes
 	return DiagnosticResult(category=category, stage=stage, ok=ok)
 
 
-def _browser_env(env: Mapping[str, str]) -> dict[str, str]:
-	return {key: value for key, value in env.items() if key.lower() not in _PROXY_NAMES}
-
-
 def _humanize_enabled(env: Mapping[str, str]) -> bool | None:
 	value = env.get('PROOF_HUMANIZE', 'true')
 	if value == 'true':
@@ -85,6 +98,21 @@ def _humanize_enabled(env: Mapping[str, str]) -> bool | None:
 	if value == 'false':
 		return False
 	return None
+
+
+def _environment_mode(env: Mapping[str, str]) -> EnvironmentMode | None:
+	try:
+		return EnvironmentMode(env.get('PROOF_ENV_MODE', 'full'))
+	except ValueError:
+		return None
+
+
+def _browser_env(env: Mapping[str, str], mode: EnvironmentMode) -> dict[str, str]:
+	match mode:
+		case EnvironmentMode.FULL:
+			return {key: value for key, value in env.items() if key.lower() not in _PROXY_NAMES}
+		case EnvironmentMode.ALLOWLIST:
+			return {name: env[name] for name in _ALLOWLIST_ENV_NAMES if name in env}
 
 
 def _preflight_result(env: Mapping[str, str]) -> DiagnosticResult | None:
@@ -137,7 +165,8 @@ async def run_diagnostic(env: Mapping[str, str]) -> DiagnosticResult:
 	if preflight is not None:
 		return preflight
 	humanize = _humanize_enabled(env)
-	if humanize is None:
+	environment_mode = _environment_mode(env)
+	if humanize is None or environment_mode is None:
 		return _result(Category.CONFIG_INVALID, Stage.LAUNCH)
 
 	stage = Stage.LAUNCH
@@ -149,7 +178,7 @@ async def run_diagnostic(env: Mapping[str, str]) -> DiagnosticResult:
 				args=_FINGERPRINT_ARGS,
 				headless=False,
 				humanize=humanize,
-				env=_browser_env(env),
+				env=_browser_env(env, environment_mode),
 			)
 			browser = launched_browser
 		stage = Stage.CONTEXT

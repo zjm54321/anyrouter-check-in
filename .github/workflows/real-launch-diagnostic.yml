@@ -44,7 +44,7 @@ jobs:
           IMAGE: real-launch-diagnostic:${{ github.sha }}
         run: docker build --platform linux/amd64 --file Dockerfile.proof --tag "$IMAGE" .
 
-      - name: Run humanize A/B/A diagnostic
+      - name: Run environment A/B/A diagnostic
         env:
           IMAGE: real-launch-diagnostic:${{ github.sha }}
         shell: bash
@@ -85,7 +85,8 @@ jobs:
                       '--env', 'XDG_CACHE_HOME=/home/cloak/.cache',
                       '--env', 'XDG_RUNTIME_DIR=/home/cloak/.runtime',
                       '--env', 'TMPDIR=/home/cloak',
-                      '--env', f'PROOF_HUMANIZE={value}',
+                       '--env', 'PROOF_HUMANIZE=false',
+                       '--env', f'PROOF_ENV_MODE={value}',
                       '--entrypoint', '/usr/bin/timeout', image,
                       '--signal=TERM', '--kill-after=5s', '55s',
                       '/usr/bin/xvfb-run', '-a', '.venv/bin/python',
@@ -105,7 +106,7 @@ jobs:
               assert completed.returncode in {0, 1}, completed.returncode
               return completed.returncode, payload
 
-          results = [run_case(value) for value in ('true', 'false', 'true')]
+          results = [run_case(value) for value in ('full', 'allowlist', 'full')]
           print(json.dumps({'cases': [payload for _, payload in results]}, sort_keys=True))
           assert results[0] == results[2], results
           PY

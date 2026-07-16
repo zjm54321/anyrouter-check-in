@@ -191,3 +191,76 @@ async def test_real_launch_smoke_forwards_false_humanize_mode(
 	# Then
 	assert result.ok is True
 	assert observed == [True]
+
+
+@pytest.mark.asyncio
+async def test_real_launch_smoke_uses_strict_allowlist_when_requested(
+	monkeypatch: pytest.MonkeyPatch,
+	tmp_path: Path,
+) -> None:
+	# Given
+	diagnostic = real_diagnostic_module()
+	browser = FakeBrowser(FakeContext(FakePage()))
+	observed: list[Mapping[str, str]] = []
+
+	async def launch(
+		*,
+		args: Sequence[str] | None,
+		env: Mapping[str, str],
+		headless: bool,
+		humanize: bool,
+	) -> FakeBrowser:
+		_ = args, headless, humanize
+		observed.append(env)
+		return browser
+
+	async def prepare(_page: FakePage) -> None:
+		return None
+
+	monkeypatch.setattr(diagnostic, 'launch_async', launch)
+	monkeypatch.setattr(diagnostic, 'prepare_browser_page', prepare)
+	env = smoke_env(tmp_path, humanize='false')
+	env['PROOF_ENV_MODE'] = 'allowlist'
+	env['UNRELATED_SENTINEL'] = 'not-forwarded'
+
+	# When
+	result = await diagnostic.run_diagnostic(env)
+
+	# Then
+	assert result.ok is True
+	expected_names = (
+		'DISPLAY',
+		'HOME',
+		'LANG',
+		'LC_ALL',
+		'PATH',
+		'TMPDIR',
+		'XAUTHORITY',
+		'XDG_CACHE_HOME',
+		'XDG_CONFIG_HOME',
+		'XDG_RUNTIME_DIR',
+	)
+	assert observed == [{
+		name: env[name]
+		for name in expected_names
+		if name in env
+	}]
+	assert 'UNRELATED_SENTINEL' not in observed[0]
+
+
+@pytest.mark.asyncio
+async def test_real_launch_smoke_rejects_unknown_environment_mode(
+	tmp_path: Path,
+) -> None:
+	# Given
+	env = smoke_env(tmp_path)
+	env['PROOF_ENV_MODE'] = 'unknown'
+
+	# When
+	result = await real_diagnostic_module().run_diagnostic(env)
+
+	# Then
+	assert result.to_json() == (
+		'{"category":"config_invalid","event":"cloakbrowser_proof_launch_smoke",'
+		'"ok":false,"stage":"launch"}'
+	)
