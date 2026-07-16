@@ -86,8 +86,8 @@ jobs:
                       '--env', 'XDG_RUNTIME_DIR=/home/cloak/.runtime',
                       '--env', 'TMPDIR=/home/cloak',
                        '--env', 'PROOF_HUMANIZE=false',
-                       '--env', 'PROOF_ENV_MODE=allowlist',
-                       '--env', f'PROOF_FINGERPRINT_MODE={value}',
+                       '--env', f'PROOF_ENV_MODE={value}',
+                       '--env', 'PROOF_FINGERPRINT_MODE=default',
                       '--entrypoint', '/usr/bin/timeout', image,
                       '--signal=TERM', '--kill-after=5s', '55s',
                       '/usr/bin/xvfb-run', '-a', '.venv/bin/python',
@@ -107,7 +107,7 @@ jobs:
               assert completed.returncode in {0, 1}, completed.returncode
               return completed.returncode, payload
 
-          results = [run_case(value) for value in ('fixed', 'default', 'fixed')]
+          results = [run_case(value) for value in ('full', 'allowlist', 'full')]
           print(json.dumps({'cases': [payload for _, payload in results]}, sort_keys=True))
           assert results[0] == results[2], results
           PY
