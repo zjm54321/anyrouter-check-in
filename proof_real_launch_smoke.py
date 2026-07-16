@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import os
 import sys
@@ -14,7 +15,13 @@ def main() -> int:
 	result: DiagnosticResult
 	try:
 		with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-			result = anyio.run(run_diagnostic, os.environ)
+			match os.environ.get('PROOF_LOOP_MODE', 'asyncio'):
+				case 'asyncio':
+					result = asyncio.run(run_diagnostic(os.environ))
+				case 'anyio':
+					result = anyio.run(run_diagnostic, os.environ)
+				case _:
+					result = DiagnosticResult(category=Category.CONFIG_INVALID, stage=Stage.LAUNCH, ok=False)
 	except Exception:  # noqa: BLE001, BROAD_EXCEPT_OK
 		result = DiagnosticResult(category=Category.LAUNCH_FAILED, stage=Stage.LAUNCH, ok=False)
 	_ = sys.stdout.write(f'{result.to_json()}\n')
