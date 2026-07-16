@@ -68,6 +68,11 @@ class EnvironmentMode(StrEnum):
 	ALLOWLIST = 'allowlist'
 
 
+class FingerprintMode(StrEnum):
+	FIXED = 'fixed'
+	DEFAULT = 'default'
+
+
 @dataclass(frozen=True, slots=True)
 class DiagnosticResult:
 	category: Category
@@ -105,6 +110,21 @@ def _environment_mode(env: Mapping[str, str]) -> EnvironmentMode | None:
 		return EnvironmentMode(env.get('PROOF_ENV_MODE', 'full'))
 	except ValueError:
 		return None
+
+
+def _fingerprint_mode(env: Mapping[str, str]) -> FingerprintMode | None:
+	try:
+		return FingerprintMode(env.get('PROOF_FINGERPRINT_MODE', 'fixed'))
+	except ValueError:
+		return None
+
+
+def _fingerprint_args(mode: FingerprintMode) -> tuple[str, ...] | None:
+	match mode:
+		case FingerprintMode.FIXED:
+			return _FINGERPRINT_ARGS
+		case FingerprintMode.DEFAULT:
+			return None
 
 
 def _browser_env(env: Mapping[str, str], mode: EnvironmentMode) -> dict[str, str]:
@@ -166,8 +186,10 @@ async def run_diagnostic(env: Mapping[str, str]) -> DiagnosticResult:
 		return preflight
 	humanize = _humanize_enabled(env)
 	environment_mode = _environment_mode(env)
-	if humanize is None or environment_mode is None:
+	fingerprint_mode = _fingerprint_mode(env)
+	if humanize is None or environment_mode is None or fingerprint_mode is None:
 		return _result(Category.CONFIG_INVALID, Stage.LAUNCH)
+	fingerprint_args = _fingerprint_args(fingerprint_mode)
 
 	stage = Stage.LAUNCH
 	browser: Browser | None = None
@@ -175,7 +197,7 @@ async def run_diagnostic(env: Mapping[str, str]) -> DiagnosticResult:
 	try:
 		with anyio.fail_after(DIAGNOSTIC_TIMEOUT_SECONDS):
 			launched_browser = await launch_async(
-				args=_FINGERPRINT_ARGS,
+				args=fingerprint_args,
 				headless=False,
 				humanize=humanize,
 				env=_browser_env(env, environment_mode),

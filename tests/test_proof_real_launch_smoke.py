@@ -48,13 +48,18 @@ class FakeBrowser:
 		self.closed = True
 
 
-def smoke_env(tmp_path: Path, humanize: str = 'true') -> dict[str, str]:
+def smoke_env(
+	tmp_path: Path,
+	humanize: str = 'true',
+	fingerprint_mode: str = 'fixed',
+) -> dict[str, str]:
 	home = tmp_path / 'home'
 	return {
 		'CLOAKBROWSER_BINARY_PATH': sys.executable,
 		'DISPLAY': ':99',
 		'HOME': str(home),
 		'PATH': os.environ['PATH'],
+		'PROOF_FINGERPRINT_MODE': fingerprint_mode,
 		'PROOF_HUMANIZE': humanize,
 		'TMPDIR': str(home / '.runtime'),
 		'XAUTHORITY': str(tmp_path / 'xvfb-run' / 'Xauthority'),
@@ -191,6 +196,43 @@ async def test_real_launch_smoke_forwards_false_humanize_mode(
 	# Then
 	assert result.ok is True
 	assert observed == [True]
+
+
+@pytest.mark.asyncio
+async def test_real_launch_smoke_omits_fingerprint_argument_in_default_mode(
+	monkeypatch: pytest.MonkeyPatch,
+	tmp_path: Path,
+) -> None:
+	# Given
+	diagnostic = real_diagnostic_module()
+	browser = FakeBrowser(FakeContext(FakePage()))
+	observed: list[tuple[str, ...]] = []
+
+	async def launch(
+		*,
+		args: Sequence[str] | None,
+		env: Mapping[str, str],
+		headless: bool,
+		humanize: bool,
+	) -> FakeBrowser:
+		_ = env, headless, humanize
+		observed.append(tuple(args or ()))
+		return browser
+
+	async def prepare(_page: FakePage) -> None:
+		return None
+
+	monkeypatch.setattr(diagnostic, 'launch_async', launch)
+	monkeypatch.setattr(diagnostic, 'prepare_browser_page', prepare)
+
+	# When
+	result = await diagnostic.run_diagnostic(
+		smoke_env(tmp_path, humanize='false', fingerprint_mode='default'),
+	)
+
+	# Then
+	assert result.ok is True
+	assert observed == [()]
 
 
 @pytest.mark.asyncio
