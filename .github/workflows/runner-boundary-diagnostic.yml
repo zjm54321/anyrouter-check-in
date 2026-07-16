@@ -1,0 +1,90 @@
+name: Diagnose runner browser boundary
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Build one runner-boundary image
+        env:
+          IMAGE: runner-boundary-diagnostic:${{ github.sha }}
+        run: docker build --platform linux/amd64 --file Dockerfile.proof --tag "$IMAGE" .
+
+      - name: Run identical A/B/A runner-boundary smoke
+        env:
+          IMAGE: runner-boundary-diagnostic:${{ github.sha }}
+        shell: bash
+        run: |
+          IMAGE="$IMAGE" python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          image = os.environ['IMAGE']
+          expected = {
+              'category': 'pre_navigation',
+              'closed': True,
+              'event': 'cloakbrowser_runner_boundary_smoke',
+              'ok': True,
+              'stage': 'pre_navigation',
+          }
+
+          def inspect_image_id() -> str:
+              completed = subprocess.run(
+                  ['docker', 'image', 'inspect', '--format', '{{.Id}}', image],
+                  capture_output=True,
+                  text=True,
+                  timeout=30,
+              )
+              assert completed.returncode == 0, completed.returncode
+              assert completed.stderr == '', completed.stderr
+              image_id = completed.stdout.strip()
+              assert image_id.startswith('sha256:'), image_id
+              return image_id
+
+          image_id = inspect_image_id()
+
+          def run_case() -> dict[str, str | bool]:
+              completed = subprocess.run(
+                  [
+                      'docker', 'run', '--rm', '--network', 'none', '--read-only',
+                      '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
+                      '--tmpfs', '/dev/shm:rw,nosuid,nodev,size=512m',
+                      '--tmpfs', '/home/cloak:rw,nosuid,nodev,size=64m',
+                      '--env', 'HOME=/home/cloak',
+                      '--env', 'XDG_CONFIG_HOME=/home/cloak/.config',
+                      '--env', 'XDG_CACHE_HOME=/home/cloak/.cache',
+                      '--env', 'XDG_RUNTIME_DIR=/home/cloak/.runtime',
+                      '--env', 'TMPDIR=/home/cloak',
+                      '--entrypoint', '/usr/bin/timeout', image_id,
+                      '--signal=TERM', '--kill-after=5s', '55s',
+                      '/usr/bin/xvfb-run', '-a', '.venv/bin/python',
+                      'proof_runner_boundary_smoke.py',
+                  ],
+                  capture_output=True,
+                  text=True,
+                  timeout=70,
+              )
+              assert completed.returncode == 0, completed.returncode
+              assert completed.stderr == '', completed.stderr
+              lines = completed.stdout.splitlines()
+              assert len(lines) == 1, len(lines)
+              payload = json.loads(lines[0])
+              assert set(payload) == {'category', 'closed', 'event', 'ok', 'stage'}
+              assert payload == expected
+              return payload
+
+          results = [run_case() for _run_label in ('A', 'B', 'A')]
+          assert results[0] == results[1] == results[2]
+          assert inspect_image_id() == image_id
+          print(json.dumps({'event': 'runner_boundary_aba_complete', 'ok': True}, sort_keys=True))
+          PY
