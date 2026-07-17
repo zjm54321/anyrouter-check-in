@@ -1,0 +1,127 @@
+name: Diagnose accepted image writable HOME
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out diagnostic probe
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Pull and verify exact accepted image
+        env:
+          IMAGE: ghcr.io/zjm54321/anyrouter-reference-proof:a21879410c6c0cd113d277162d800288951df650@sha256:30a077d3b372dd72b8a87f90e051f7a84cf517958dd9d4a517159638c4daedd6
+          EXPECTED_REPO_DIGEST: ghcr.io/zjm54321/anyrouter-reference-proof@sha256:30a077d3b372dd72b8a87f90e051f7a84cf517958dd9d4a517159638c4daedd6
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull --platform linux/amd64 "$IMAGE" >/dev/null
+          test "$(docker image inspect "$IMAGE" --format '{{.Architecture}}')" = 'amd64'
+          docker image inspect "$IMAGE" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep -Fxq -- "$EXPECTED_REPO_DIGEST"
+
+      - name: Run writable HOME A/B/A against accepted digest
+        env:
+          IMAGE: ghcr.io/zjm54321/anyrouter-reference-proof:a21879410c6c0cd113d277162d800288951df650@sha256:30a077d3b372dd72b8a87f90e051f7a84cf517958dd9d4a517159638c4daedd6
+        shell: bash
+        run: |
+          IMAGE="$IMAGE" python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          image = os.environ['IMAGE']
+          probe_path = str((Path.cwd() / 'accepted_image_aba_probe.py').resolve())
+          read_only_records = {
+              ('browser_launch_failure', False, 'browser_launch', False),
+              ('boundary_failure', False, 'boundary', False),
+              ('boundary_failure', False, 'boundary', True),
+              ('close_failure', False, 'browser_close', False),
+          }
+          writable_home_expected = {
+              'category': 'pre_navigation',
+              'closed': True,
+              'event': 'accepted_image_browser_boundary_probe',
+              'ok': True,
+              'stage': 'pre_navigation',
+          }
+
+          def run_case(writable_home: bool) -> tuple[int, str, dict[str, str | bool]]:
+              home_arguments: list[str] = []
+              if writable_home:
+                  home_arguments = [
+                      '--tmpfs', '/home/cloak:rw,nosuid,nodev,size=64m',
+                      '--env', 'HOME=/home/cloak',
+                      '--env', 'XDG_CONFIG_HOME=/home/cloak/.config',
+                      '--env', 'XDG_CACHE_HOME=/home/cloak/.cache',
+                      '--env', 'XDG_RUNTIME_DIR=/home/cloak/.runtime',
+                      '--env', 'TMPDIR=/home/cloak',
+                  ]
+              completed = subprocess.run(
+                  [
+                      'docker', 'run', '--rm', '--network', 'none', '--read-only',
+                      '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
+                      '--tmpfs', '/dev/shm:rw,nosuid,nodev,size=512m',
+                      '--mount',
+                      f'type=bind,src={probe_path},dst=/app/accepted_image_aba_probe.py,readonly',
+                      *home_arguments,
+                      '--entrypoint', '/usr/bin/timeout', image,
+                      '--signal=TERM', '--kill-after=5s', '55s',
+                      '/usr/bin/xvfb-run', '-a', '.venv/bin/python',
+                      'accepted_image_aba_probe.py',
+                  ],
+                  capture_output=True,
+                  text=True,
+                  timeout=70,
+              )
+              assert completed.stderr == ''
+              assert completed.returncode in {0, 1}
+              lines = completed.stdout.splitlines()
+              assert len(lines) == 1
+              payload = json.loads(lines[0])
+              assert isinstance(payload, dict)
+              assert set(payload) == {'category', 'closed', 'event', 'ok', 'stage'}
+              assert payload['event'] == 'accepted_image_browser_boundary_probe'
+              record = (
+                  payload['category'],
+                  payload['ok'],
+                  payload['stage'],
+                  payload['closed'],
+              )
+              if writable_home:
+                  assert payload == writable_home_expected
+              else:
+                  assert record in read_only_records
+              assert completed.returncode == (0 if payload['ok'] else 1)
+              return completed.returncode, completed.stdout, payload
+
+          def write_record(record: dict[str, str | bool]) -> None:
+              print(json.dumps(record, separators=(',', ':'), sort_keys=True))
+
+          def main() -> int:
+              try:
+                  cases = (False, True, False)
+                  results = [run_case(writable_home) for writable_home in cases]
+                  assert results[0] == results[2]
+                  assert results[0][2] != results[1][2]
+              except Exception:
+                  write_record({
+                      'category': 'driver_failure',
+                      'closed': False,
+                      'event': 'accepted_image_writable_home_aba',
+                      'ok': False,
+                      'stage': 'driver',
+                  })
+                  return 1
+              for _, _, payload in results:
+                  write_record(payload)
+              return 0
+
+          raise SystemExit(main())
+          PY
